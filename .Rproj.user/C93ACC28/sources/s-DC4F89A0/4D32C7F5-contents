@@ -1,0 +1,309 @@
+---
+title: "Standardised fields analysis"
+output: html_notebook
+---
+
+
+Upload data if required
+
+```{r}
+#combinedData <- readr::read_csv('unfilteredDataExports/clinicalTrialsDataUnfilteredExport-2022-01-27.csv')
+```
+
+Add fields where no complex data manipulation is requried
+
+```{r}
+combinedData <- mutate(combinedData, covid19Study = grepl("COVID-19", indicationList, fixed = TRUE))
+
+combinedData <- mutate(combinedData, yearTrialStart = format(as.Date(trialStartDate, format="%Y-%m-%d"),"%Y")) |>
+  mutate(monthTrialStart = format(as.Date(trialStartDate, format="%Y-%m-%d"),"%m"))
+
+highIncomeCountryCodes <- c(392, 393, 394, 395, 396, 400, 402, 403, 405, 407, 408, 410, 411, 412, 413, 414, 415, 417, 418, 419, 420, 421, 422, 423, 427, 428, 441, 504, 337, 354, 374, 505)
+
+combinedData <- combinedData |>
+  mutate(locationIncludeHighIncomeCountry = grepl(paste(highIncomeCountryCodes, collapse = "|"), countryList)) |>
+  mutate(locationIncludeBRICS = grepl(paste(c(509, 401, 352, 345, 490), collapse = "|"), countryList)) |>
+  mutate(numbCountryLocations = str_count(countryList, ";") + 1) |>
+  
+combinedData <- combinedData |>
+  mutate(singleCountryTrial = numbCountryLocations == 1)
+
+combinedData <- combinedData |>
+  mutate(trialPhaseGrouped = case_when(
+    trialPhaseList == "2571||Phase 0" ~ 1,
+    trialPhaseList == "2572||Phase I" ~ 1,
+    trialPhaseList == "2573||Phase II" ~ 2,
+    trialPhaseList == "2574||Phase III" ~ 3,
+    trialPhaseList == "2575||Phase IV" ~ 4,
+    trialPhaseList == "9865||Phase I/II" ~ 2,
+    trialPhaseList == "9866||Phase II/III" ~ 3,
+    trialPhaseList == "9867||Phase III/IV" ~ 4
+  ))
+
+combinedData <- combinedData |>
+  mutate(includesCRO = !is.na(cROlist))
+
+filteredData <- mutate(filteredData, quarterTrialStart = case_when(
+  as.numeric(monthTrialStart) <= 3 ~ 1,
+  as.numeric(monthTrialStart) <= 6 ~ 2,
+  as.numeric(monthTrialStart) <= 9 ~ 3,
+  as.numeric(monthTrialStart) <= 12 ~ 4,
+  TRUE ~ 999
+))
+```
+
+
+Next - either load the companiesClinicalId and CROsClinicalId lookups or generate them by running the code in 4-OneToManyDataManipulation
+
+```{r}
+#companiesClinicalIdDF <- readr::read_csv('unfilteredDataExports/companiesClinicalId-2022-01-28.csv')
+#CROsClinicalIdDF <- readr::read_csv('unfilteredDataExports/CROsClinicalId-2022-01-28.csv')
+```
+
+```{r}
+companiesClinicalIdDF <- merge(x = companiesClinicalIdDF, y = combinedData[c("yearTrialStart", "statusList", "studyList", "clinicalId")], by = "clinicalId", all.x = TRUE)
+
+trialsByCompany <- companiesClinicalIdDF |>
+  filter(yearTrialStart >= 2010 & yearTrialStart <= 2021 & !statusList %in% c("84||Withdrawn") & studyList == '2||Interventional') |>
+  group_by(companyName) |>
+  summarise(totalTrials = n())
+
+CROsClinicalIdDF <- merge(x = CROsClinicalIdDF, y = combinedData[c("yearTrialStart", "statusList", "studyList", "clinicalId")], by = "clinicalId", all.x = TRUE)
+
+trialsByCRO <- CROsClinicalIdDF |>
+  filter(yearTrialStart >= 2010 & yearTrialStart <= 2021 & !statusList %in% c("84||Withdrawn") & studyList == '2||Interventional') |>
+  group_by(CRO) |>
+  summarise(CROtrials = n()) |>
+  rowwise() |>
+  mutate(companyName = trimws(strsplit(CRO, '[||]')[[1]][[3]])) |>
+  mutate(CRO = NULL)
+
+companiesData <- merge(x = trialsByCompany, y = trialsByCRO, by = "companyName", all = TRUE)
+
+rm(trialsByCompany, trialsByCRO)
+
+trialsByCompanyByYear <- filter(companiesClinicalIdDF[order(companiesClinicalIdDF$yearTrialStart),], yearTrialStart >= 2010 & yearTrialStart <= 2021 & !statusList %in% c("84||Withdrawn") & studyList == '2||Interventional') |>
+  group_by(yearTrialStart, companyName) |>
+  summarise(countOfTrials = n()) |>
+  pivot_wider(names_from = yearTrialStart, values_from = countOfTrials) 
+
+trialsByCompanyByYear[is.na(trialsByCompanyByYear)] <- 0
+
+trialsByCompanyByYear <- trialsByCompanyByYear |>
+  rowwise() |>
+  mutate(companySize = case_when(
+    `2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021` > 100 ~ 'Large',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[3] > 15 ~ 'Large',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[2] > 20 ~ 'Large',
+    `2019`+`2020`+`2021` > 45 ~ 'Large',
+    `2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021` > 25 ~ 'Medium',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[3] > 6 ~ 'Medium',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[2] > 8 ~ 'Medium',
+    `2019`+`2020`+`2021` > 12 ~ 'Medium',
+    TRUE ~ 'Small'))
+
+companiesData <- merge(x = companiesData, y = trialsByCompanyByYear[c("companyName", "companySize")], by = "companyName", all.x = TRUE)
+```
+
+
+Next - go load the companies data or go to 5-CompanyDataExtraction to query for the data
+
+```{r}
+#companiesCTypeDF <- readr::read_csv('unfilteredDataExports/companiesCTypeDF-2022-01-28.csv')
+```
+
+```{r}
+companiesCTypeDF <- companiesCTypeDF |>
+  group_by(companyName, ctype) |>
+  summarise(countOfTrials = n()) |>
+  pivot_wider(names_from = "ctype", values_from = "countOfTrials") |>
+  mutate(ctype = case_when(
+    `3` > `1` & `3` > `2` ~ "CRO",
+    `1` > `2` ~ "Commercial",
+    TRUE ~ "Academic/Institution"
+  ))
+
+companiesData <- merge(x = companiesData, y = companiesCTypeDF[c("companyName", "ctype")], by = "companyName", all.x = TRUE)
+```
+
+```{r}
+#clinicalTrialsCompaniesData <- readr::read_csv('unfilteredDataExports/clinicalTrialsCompaniesData-2022-01-28.csv')
+```
+
+```{r}
+companiesData <- merge(x = companiesData, y = clinicalTrialsCompaniesData[c("companyExactName", "country", "firmType", "primarySubsector", "marketCap", "companyType", "entityType", "parentCompany", "primaryProjectSector", "totalEmployees", "contractResearch")], by.x = "companyName", by.y = "companyExactName", all.x = TRUE)
+```
+
+```{r}
+companiesData <- companiesData |>
+  mutate(CROshare = round(CROtrials/totalTrials, digits = 3)) |>
+  mutate(isCRO = case_when(
+    !is.na(contractResearch) & CROshare > 0.3 ~ TRUE,
+    CROshare > 0.5 & CROtrials > 5 ~ TRUE,
+    CROshare > 0.6 & CROtrials > 1 ~ TRUE,
+    TRUE ~ FALSE))
+
+companyTypeLookup <- companiesData |>
+  group_by(firmType, isCRO, companyType, ctype) |>
+  summarise(countOfTrials = n()) |>
+  mutate(companyGroup = case_when(
+    isCRO ~ 'CRO',
+    trimws(firmType) == 'Company' ~ 'Commercial',
+    grepl('Academic', firmType, fixed = TRUE) ~ 'Academic',
+    grepl('Clinical Trial Network', firmType, fixed = TRUE) ~ 'Institution',
+    grepl('Hospital', firmType, fixed = TRUE) ~ 'Hospital',
+    grepl('Advisor', firmType, fixed = TRUE) ~ 'Commercial',
+    grepl('Not-for-Profit', firmType, fixed = TRUE) ~ 'Non-profit',
+    grepl('Foundation', firmType, fixed = TRUE) ~ 'Non-profit',
+    grepl('Venture Capital', firmType, fixed = TRUE) ~ 'Commercial',
+    grepl('Private Equity', firmType, fixed = TRUE) ~ 'Commercial',
+    companyType %in% c('Institution','Government') ~ 'Institution',
+    !is.na(ctype) ~ ctype,
+    TRUE ~ 'Unknown'
+  )) |>
+  mutate(countOfTrials = NULL)
+
+companiesData <- merge(x = companiesData, y = companyTypeLookup, by = c('firmType','isCRO', 'companyType', 'ctype'), all.x = TRUE)
+
+companiesData <- companiesData |>
+  rowwise() |>
+  mutate(companyGroupingSimplified = case_when(
+    isCRO ~ "CRO",
+    companyGroup %in% c("Academic", "Institution", "Non-profit", "Academic/Institution") ~ "Institution/Non-profit",
+    companyGroup == "Commercial" ~ "Commercial",
+    companyGroup == "Hospital" ~ "Hospital",
+    TRUE ~ "Other"
+  ))
+
+write.table(companiesData, paste0("unfilteredDataExports/companiesData-",toString(Sys.Date()),".csv"), row.names = FALSE, col.names = TRUE, sep = ",")
+
+rm(companyTypeLookup)
+```
+
+
+```{r}
+companiesClinicalIdDF <- merge(x = companiesClinicalIdDF, y = companiesData[c("companyName", "companyGroup", "isCRO", "companyGroupingSimplified", "companySize")], by = "companyName", all.x = TRUE)
+```
+
+```{r}
+includesCommercial <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Commercial") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercial = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercial[c("clinicalId", "includesCommercial")], by = "clinicalId", all.x = TRUE)
+
+includesNonProfitInstitution <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Institution/Non-profit") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitution = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesNonProfitInstitution[c("clinicalId", "includesInstitution")], by = "clinicalId", all.x = TRUE)
+
+includesCommercialLarge <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Commercial" & companySize == "Large") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercialLarge = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercialLarge[c("clinicalId", "includesCommercialLarge")], by = "clinicalId", all.x = TRUE)
+  
+
+includesCommercialMedium <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Commercial" & companySize == "Medium") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercialMedium = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercialMedium[c("clinicalId", "includesCommercialMedium")], by = "clinicalId", all.x = TRUE)
+
+
+includesCommercialSmall <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Commercial" & companySize == "Small") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercialSmall = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercialSmall[c("clinicalId", "includesCommercialSmall")], by = "clinicalId", all.x = TRUE)
+
+includesInstitutionSmall <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Institution/Non-profit" & companySize == "Small") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitutionSmall = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesInstitutionSmall[c("clinicalId", "includesInstitutionSmall")], by = "clinicalId", all.x = TRUE)
+
+includesInstitutionMedium <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Institution/Non-profit" & companySize == "Medium") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitutionMedium = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesInstitutionMedium[c("clinicalId", "includesInstitutionMedium")], by = "clinicalId", all.x = TRUE)
+
+
+includesInstitutionLarge <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "Institution/Non-profit" & companySize == "Large") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitutionLarge = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesInstitutionLarge[c("clinicalId", "includesInstitutionLarge")], by = "clinicalId", all.x = TRUE)
+
+
+includesCROLarge <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "CRO" & companySize == "Large") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCROLarge = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCROLarge[c("clinicalId", "includesCROLarge")], by = "clinicalId", all.x = TRUE)
+
+
+includesCROMedium <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "CRO" & companySize == "Medium") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCROMedium = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCROMedium[c("clinicalId", "includesCROMedium")], by = "clinicalId", all.x = TRUE)
+
+includesCROSmall <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == "CRO" & companySize == "Small") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCROSmall = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCROSmall[c("clinicalId", "includesCROSmall")], by = "clinicalId", all.x = TRUE)
+
+```
+
+
+
+For decentralised trials data
+
+```{r}
+componentsLookup <- read_excel("001-virtualDCT/decentralisedTrials-componentGroupingsLookup-rLookup.xlsx")
+
+filteredData$virtualComponentGroupingList = filteredData$virtualComponentList
+
+for (i in 1:length(componentsLookup$rLUT)) {
+  
+  filteredData$virtualComponentGroupingList <- gsub(componentsLookup[i, "Virtual component"], componentsLookup[i, "rLUT"], filteredData$virtualComponentGroupingList, ignore.case = TRUE)
+  
+}
+
+
+filteredData$virtualComponentGroupingListSub = filteredData$virtualComponentList
+
+for (i in 1:length(componentsLookup$rLUT2)) {
+  
+  filteredData$virtualComponentGroupingListSub <- gsub(componentsLookup[i, "Virtual component"], componentsLookup[i, "rLUT2"], filteredData$virtualComponentGroupingListSub, ignore.case = TRUE)
+  
+}
+```
+
+

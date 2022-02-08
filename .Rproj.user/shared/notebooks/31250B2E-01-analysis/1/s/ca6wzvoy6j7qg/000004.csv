@@ -1,0 +1,3 @@
+"0","graph1Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][[""statesAnalysis""]][c(""State.Code"", ""cases7DaysPerPaxlovid"", ""cases7DaysPerMolnupiravir"", ""cases7DaysperPPlusM"")]"
+"0",""
+"0","write.table(graph1Data, ""02-rOutputs/graph1Data.csv"", row.names = FALSE, col.names = TRUE, sep = "","")"

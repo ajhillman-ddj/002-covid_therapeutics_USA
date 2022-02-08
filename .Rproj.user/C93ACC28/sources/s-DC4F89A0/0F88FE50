@@ -1,0 +1,27 @@
+{
+    "id": "0F88FE50",
+    "path": "~/2022/Medical/Topic/002-covid_therapeutics_USA/01-analysis.Rmd",
+    "project_path": "01-analysis.Rmd",
+    "type": "r_markdown",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1644325269537.0,
+    "source_on_save": false,
+    "relative_order": 1,
+    "properties": {
+        "chunk_output_type": "inline",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "286,0",
+        "scrollLine": "271"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1644325451,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1644325451675,
+    "read_only": false,
+    "read_only_alternatives": []
+}

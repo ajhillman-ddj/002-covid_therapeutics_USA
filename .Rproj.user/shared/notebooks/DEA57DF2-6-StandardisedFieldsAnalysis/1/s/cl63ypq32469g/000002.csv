@@ -1,0 +1,47 @@
+"0","```r
+companiesClinicalIdDF <- merge(x = companiesClinicalIdDF, y = combinedData[c(\"yearTrialStart\", \"statusList\", \"studyList\", \"clinicalId\")], by = \"clinicalId\", all.x = TRUE)
+
+trialsByCompany <- companiesClinicalIdDF |>
+  filter(yearTrialStart >= 2010 & yearTrialStart <= 2021 & !statusList %in% c(\"84||Withdrawn\") & studyList == '2||Interventional') |>
+  group_by(companyName) |>
+  summarise(totalTrials = n())
+
+CROsClinicalIdDF <- merge(x = CROsClinicalIdDF, y = combinedData[c(\"yearTrialStart\", \"statusList\", \"studyList\", \"clinicalId\")], by = \"clinicalId\", all.x = TRUE)
+
+trialsByCRO <- CROsClinicalIdDF |>
+  filter(yearTrialStart >= 2010 & yearTrialStart <= 2021 & !statusList %in% c(\"84||Withdrawn\") & studyList == '2||Interventional') |>
+  group_by(CRO) |>
+  summarise(CROtrials = n()) |>
+  rowwise() |>
+  mutate(companyName = trimws(strsplit(CRO, '[||]')[[1]][[3]])) |>
+  mutate(CRO = NULL)
+
+companiesData <- merge(x = trialsByCompany, y = trialsByCRO, by = \"companyName\", all = TRUE)
+
+rm(trialsByCompany, trialsByCRO)
+
+trialsByCompanyByYear <- filter(companiesClinicalIdDF[order(companiesClinicalIdDF$yearTrialStart),], yearTrialStart >= 2010 & yearTrialStart <= 2021 & !statusList %in% c(\"84||Withdrawn\") & studyList == '2||Interventional') |>
+  group_by(yearTrialStart, companyName) |>
+  summarise(countOfTrials = n()) |>
+  pivot_wider(names_from = yearTrialStart, values_from = countOfTrials) 
+```"
+"1","`summarise()` has grouped output by 'yearTrialStart'. You can override using the `.groups` argument.
+"
+"0","```r
+trialsByCompanyByYear[is.na(trialsByCompanyByYear)] <- 0
+
+trialsByCompanyByYear <- trialsByCompanyByYear |>
+  rowwise() |>
+  mutate(companySize = case_when(
+    `2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021` > 100 ~ 'Large',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[3] > 15 ~ 'Large',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[2] > 20 ~ 'Large',
+    `2019`+`2020`+`2021` > 45 ~ 'Large',
+    `2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021` > 25 ~ 'Medium',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[3] > 6 ~ 'Medium',
+    sort(c(`2010`+`2011`+`2012`+`2013`+`2014`+`2015`+`2016`+`2017`+`2018`+`2019`+`2020`+`2021`), TRUE)[2] > 8 ~ 'Medium',
+    `2019`+`2020`+`2021` > 12 ~ 'Medium',
+    TRUE ~ 'Small'))
+
+companiesData <- merge(x = companiesData, y = trialsByCompanyByYear[c(\"companyName\", \"companySize\")], by = \"companyName\", all.x = TRUE)
+```"

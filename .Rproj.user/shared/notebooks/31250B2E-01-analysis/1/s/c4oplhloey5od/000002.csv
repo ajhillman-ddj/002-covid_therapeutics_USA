@@ -1,0 +1,137 @@
+"0","byDateTherapeuticsAnalysis <- lapply(unique(therapeuticsData$rowDate), function(x) {"
+"0","  "
+"0","  filteredData <- filter(therapeuticsData, rowDate == x)"
+"0","  "
+"0","  output <- list()"
+"0","  "
+"0","  output[['date']] <- x"
+"0","  "
+"0","  statesAnalysis <- filteredData |>"
+"0","    group_by(Order.Label, State.Code) |>"
+"0","    summarise(count = sum(Courses.Available)) |>"
+"0","    pivot_wider(names_from = Order.Label, values_from = count)"
+"0","    "
+"0","  statesAnalysis[is.na(statesAnalysis)] <- 0"
+"0","  "
+"0","  statesAnalysis <- merge(x = statesAnalysis, y = statesCasesCombined, by.x = ""State.Code"", by.y = ""state"", all.x = TRUE)"
+"0","  "
+"0","  statesAnalysis <- merge(x = statesAnalysis, y = statePopData[c(""stateCode"", ""POPESTIMATE2020"")], by.x = ""State.Code"", by.y = ""stateCode"", all.x = TRUE) |>"
+"0","    filter(!is.na(POPESTIMATE2020))"
+"0","  "
+"0","  statesAnalysis <- statesAnalysis |>"
+"0","    mutate(cases2022Share = cases2022/sum(statesAnalysis$cases2022)) |>"
+"0","    mutate(cases7DaysShare = casesLastSevenDays/sum(statesAnalysis$casesLastSevenDays)) |>"
+"0","    mutate(paxlovidShare = Paxlovid/sum(statesAnalysis$Paxlovid)) |>"
+"0","    mutate(molnupiravirShare = Molnupiravir/sum(statesAnalysis$Molnupiravir)) |>"
+"0","    mutate(pPlusMShare = (Paxlovid+Molnupiravir)/(sum(statesAnalysis$Paxlovid)+sum(statesAnalysis$Molnupiravir))) |>"
+"0","    mutate(populationShare = POPESTIMATE2020/sum(statesAnalysis$POPESTIMATE2020)) |>"
+"0","    mutate(cases2022Per100000 = cases2022*100000/POPESTIMATE2020) |>"
+"0","    mutate(cases7DaysPer100000 = casesLastSevenDays*100000/POPESTIMATE2020) |>"
+"0","    mutate(paxlovidCoursesPer100000 = Paxlovid*100000/POPESTIMATE2020) |>"
+"0","    mutate(molnupiravirCoursesPer100000 = Molnupiravir*100000/POPESTIMATE2020) |>"
+"0","    mutate(pPlusMCoursesPer100000 = (Paxlovid+Molnupiravir)*100000/POPESTIMATE2020) |>"
+"0","    mutate(cases7DaysPerPaxlovid = casesLastSevenDays/Paxlovid) |>"
+"0","    mutate(cases7DaysPerMolnupiravir = casesLastSevenDays/Molnupiravir) |>"
+"0","    mutate(cases7DaysperPPlusM = casesLastSevenDays/(Paxlovid+Molnupiravir) ) |>"
+"0","    mutate(rowDate = x)"
+"0","  "
+"0","  statesAnalysis <- statesAnalysis[order(-statesAnalysis$pPlusMCoursesPer100000),]"
+"0","  "
+"0","  output[['statesAnalysis']] <- statesAnalysis"
+"0","  "
+"0","  citiesAnalysis <- filteredData |>"
+"0","    group_by(Order.Label, State.Code, City) |>"
+"0","    summarise(count = sum(Courses.Available)) |>"
+"0","    pivot_wider(names_from = Order.Label, values_from = count)"
+"0","  "
+"0","  citiesAnalysis[is.na(citiesAnalysis)] <- 0"
+"0","  "
+"0","  citiesAnalysis <- merge(x = citiesAnalysis, y = cityPopulationData, by.x=c('City', 'State.Code'), by.y=c('cityName', 'stateCode'), all.x = TRUE)|>"
+"0","    mutate(paxlovidShare = Paxlovid/sum(statesAnalysis$Paxlovid)) |>"
+"0","    mutate(molnupiravirShare = Molnupiravir/sum(statesAnalysis$Molnupiravir)) |>"
+"0","    mutate(pPlusMShare = (Paxlovid+Molnupiravir)/(sum(statesAnalysis$Paxlovid)+sum(statesAnalysis$Molnupiravir))) |>"
+"0","    mutate(populationShare = POPESTIMATE2020/sum(statesAnalysis$POPESTIMATE2020)) |>"
+"0","    mutate(paxlovidCoursesPer100000 = Paxlovid*100000/POPESTIMATE2020) |>"
+"0","    mutate(molnupiravirCoursesPer100000 = Molnupiravir*100000/POPESTIMATE2020) |>"
+"0","    mutate(pPlusMCoursesPer100000 = (Paxlovid+Molnupiravir)*100000/POPESTIMATE2020) |>"
+"0","    mutate(rowDate = x)"
+"0","  "
+"0","  citiesAnalysis <- filter(citiesAnalysis, POPESTIMATE2020 > 200000)"
+"0","  citiesAnalysis <- citiesAnalysis[order(-citiesAnalysis$pPlusMCoursesPer100000),]"
+"0","  "
+"0","  output[['citiesAnalysis']] <- citiesAnalysis"
+"0","  "
+"0","  return(output)"
+"0","})"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label'. You can override using the `.groups` argument.
+"
+"1","`summarise()` has grouped output by 'Order.Label', 'State.Code'. You can override using the `.groups` argument.
+"

@@ -1,0 +1,300 @@
+library(purrr)
+library(dplyr)
+library(tidyverse)
+library(httr)
+library(readxl)
+
+### SNIPPET FUNCTIONS ###
+
+structureToDataFrame <- function(data) {
+  
+  combinedData <- lapply(data, function(z) {
+    
+    rowData <- z[["_source"]]
+    
+    dataFrame <- lapply(names(rowData), function(y) {
+      
+      outputObject <- list()
+      
+      outputObject[['fieldName']] = y
+      
+      structureList <- capture.output(str(rowData[[y]]))
+      
+      splitBy <- NULL
+      
+      if (length(structureList) == 1) {
+        
+        splitBy <- if(grepl('/"', structureList[1], fixed = TRUE) & !grepl(paste(c("https:", "www.", ".hu"), collapse = "|"), structureList[1])) '/"' else ' '
+        splitString <-  strsplit(structureList[1], splitBy)[[1]]
+        splitStringMinus <- splitString[-c(1,2)]
+        
+        outputObject[['variableType']] <- if (trimws(splitString[[2]] == "list()")) "emptyList" else trimws(splitString[[2]])
+        outputObject[['exampleEntry']] <- if (length(splitString) > 2) trimws(str_replace_all(str_replace_all(str_replace_all(paste(splitStringMinus, collapse=" "), "'", ""), '"', ""), ",", "")) else NULL
+        
+      } else {
+        
+        objectString <- ''
+        
+        if (is.list(rowData[[y]][[1]])) {
+          
+          outputObject[["variableType"]] <- 'listOfLists'
+          
+          for (i in names(rowData[[y]][[1]])) {
+            
+            objectString <- paste0(objectString, ' ', i, ': ', rowData[[y]][[1]][[i]], ', ')
+          }
+        } else {
+          
+          outputObject[["variableType"]] <- 'singleList'
+          
+          for (i in 1:length(rowData[[y]])) {
+            
+            objectString <- paste0(objectString, rowData[[y]][[i]], ', ')
+          }
+        }
+        
+        outputObject[['exampleEntry']] <- trimws(substr(trimws(objectString), 1, nchar(trimws(objectString))-1))
+      }
+      
+      return(outputObject)
+    })
+    
+    dataFrame <- dataFrame |>
+      plyr::ldply(data.frame)
+  })
+  
+  combinedData <- bind_rows(combinedData)
+  
+  filteredData <- filter(combinedData, !is.na(exampleEntry) & exampleEntry != '' & exampleEntry != '0')
+  
+  groupedData <- filteredData |>
+    group_by(fieldName) |>
+    summarise(presenceValue = round(100*n()/length(data), digits = 1))
+  
+  filteredData <- filteredData |>
+    distinct(fieldName, .keep_all = TRUE)
+  
+  remainingData <- filter(combinedData, !fieldName %in% filteredData$fieldName) |>
+    distinct(fieldName, .keep_all = TRUE)
+  
+  recombinedData <- bind_rows(filteredData, remainingData)
+  
+  recombinedData <- merge(x = recombinedData, y = groupedData, by = "fieldName", all.x = TRUE)
+}
+
+createTermsList = function(key_value_pairs) {
+  
+  string = ''
+  
+  for (key in names(key_value_pairs)) {
+    string <- paste0(string, '{"terms": {"', key,'": ["', key_value_pairs[[key]],'"]}},' )
+  }
+  
+  string <- substr(string,1,nchar(string)-1)
+}
+
+queryOptions <- list(
+  
+  singleSelect = function(bool_fields_key_values = list(), selected_fields = '"*"', size = 99, bool = "must") {
+    
+    paste0('{ "size": ', size,',
+      "_source": [', selected_fields,'],
+      "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),
+           ']}}
+      }') },
+  
+  singleAggregation = function(aggregation_field, bool_fields_key_values = list(), size = 9999, bool="must") {
+    
+    paste0('{ "size": 0,
+      "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),
+           ']}},
+      "aggs": {"aggregatedData": {"terms": {"field": "',aggregation_field,'", "size": ', size,'}
+      }}
+} ') },
+  
+  doubleAggregation = function(aggregation_field1, aggregation_field2, bool_fields_key_values = list(), size = 9999, bool = "must") {
+    
+    paste0('{ "size": 0,
+    "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),
+           ']}},
+    "aggs": {
+      "agg1": {
+        "terms": {
+          "field": "', aggregation_field1, '", "size": ', size,'},
+    "aggs": {
+      "agg2": {
+        "terms": {
+          "field": "', aggregation_field2, '", "size": ', size,'}
+      }}}}}
+}') }
+)
+
+getData <- function(queryType, urlString = "http://iccloudbackup.elasticsearch.production.pdm.local:9200/_search/", printQuery = TRUE) {
+  if (printQuery) { print(queryType) }
+  
+  #our modifiable ES query is pulled from the queryOptions object
+  query <- glue::glue(queryType,  .open = "<<", .close = ">>")
+  #hit the server
+  response <-
+    POST(urlString,
+         body = query,
+         encode = "json"
+    )
+  #extract the data
+  data <- content(response)
+}
+
+getMaxValue = function(aggregationField, bool_fields_key_values = list(), bool="must") {
+  
+  getData(paste0('{ "size": 0,
+      "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),
+                 ']}},
+      "aggs": {"aggregatedData": {"max": {"field": "', aggregationField,'"}}}
+      }')) |> pluck("aggregations", "aggregatedData")
+}
+
+loopSelectQueryAndBindData = function(loopField, loopsNumb, fieldsList, unlistFields = list(), bool_fields_key_values = list(), size = 10000, bool="must", urlString = "http://iccloudbackup.elasticsearch.production.pdm.local:9200/_search/", query_string_inject = '', printProgress = TRUE, printQuery = FALSE) {
+  
+  loopsList <- 0:loopsNumb
+  
+  fieldsString <- paste(unlist(fieldsList), collapse=",")
+  
+  data <- lapply(loopsList, function(x) {
+    
+    if (printProgress) {print(paste0("Progress:", as.character(round(100*x/loopsNumb, digits = 1)), "%"))}
+    
+    rowData <- getData(paste0('{ "size": ', size,',
+        "_source": [', fieldsString,'],
+        "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),',
+        {"range" : {
+          "', loopField,'" : {
+                  "gte" : ', x*size, ',
+                  "lt" : ', (x+1)*size,'
+              }
+            }
+        }',
+        query_string_inject
+        ,'                       
+         ]}}
+        }'), urlString, printQuery) |>
+      pluck("hits", "hits") 
+    
+    if (length(unlistFields) > 0) {
+      
+      for (i in 1:length(rowData)) {
+        for (j in 1: length(unlistFields)) {
+          
+          if (!is.null(rowData[[i]]["_source"])) {
+            
+            if (length(rowData[[i]][["_source"]][[unlistFields[[j]]]]) == 0) {
+              
+              rowData[[i]][["_source"]][[unlistFields[[j]]]] <- ''
+            } else {
+              
+              if (is.list(rowData[[i]][["_source"]][[unlistFields[[j]]]][[1]])) {
+                
+                objectString <- ''
+                
+                for (k in 1: length(rowData[[i]][["_source"]][[unlistFields[[j]]]])) {
+                  
+                  objectString <- paste0(objectString, '{')
+                  
+                  for (z in names(rowData[[i]][["_source"]][[unlistFields[[j]]]][[k]])) {
+                    
+                    objectString <- paste0(objectString, z, ': ', rowData[[i]][["_source"]][[unlistFields[[j]]]][[k]][[z]], ', ')
+                    
+                  }
+                  
+                  objectString <- paste0(objectString, '},')
+                }
+                
+                rowData[[i]][["_source"]][[unlistFields[[j]]]] <- trimws(substr(trimws(objectString), 1, nchar(trimws(objectString))-1))
+                
+              } else {
+                
+                rowData[[i]][["_source"]][[unlistFields[[j]]]] <- paste(unlist(rowData[[i]][["_source"]][[unlistFields[[j]]]]), collapse='')
+                
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    rowData <- rowData |>
+      plyr::ldply(data.frame)
+    
+    return(rowData)
+    
+  })
+  
+  combinedData <- bind_rows(data)
+}
+
+updateColumnNames <- function(dataFrame, columnsToBeRemoved = c("_index", "_type", "_id", "_score", "X_index", "X_type", "X_id", "X_score"), originalString = "X_source.", replacementString = "") {
+  
+  newDataFrame <- dataFrame[ , !(names(dataFrame) %in% columnsToBeRemoved)]
+  names(newDataFrame) <- gsub(x = names(newDataFrame), pattern = originalString, replacement = replacementString) 
+  return(newDataFrame)
+}
+
+write.excel <- function(x,row.names=FALSE,col.names=TRUE,...) {
+  write.table(x,"clipboard",sep="\t",row.names=row.names,col.names=col.names,...)
+}
+
+### GET DATA
+
+### Get SingleRowExport data ###
+
+bool_fields_key_values <- setNames(as.list(c("pharmaintelligencecenter", "trialsinglerowexport")), c("_index", "_type"))
+
+checkData <- getData(queryOptions$singleSelect(size=100, bool_fields_key_values = bool_fields_key_values)) |> pluck("hits", "hits")
+
+fieldsDataFrame <- structureToDataFrame(checkData)
+
+write.excel(fieldsDataFrame)
+
+includeFieldsDF <- read_excel("001-virtualDCT/dataAnalysis/dataStructureExtracts.xlsx",sheet = "singleRowExport")|>
+  filter(include == "TRUE")
+unlistIncludeFieldsDF <- filter(includeFieldsDF, variableType %in% c("singleList", "listOfLists"))
+includeFieldsList <- lapply(includeFieldsDF$fieldName, function(x) {paste0('"',x,'"') })
+
+loopsNumb <- round(getMaxValue("clinicalId", list(list("_index", "pharmaintelligencecenter"), list("_type", "trialsinglerowexport")))$value, -4)/10000+1
+
+singleRowExportData <- loopSelectQueryAndBindData("clinicalId", loopsNumb, fieldsList = includeFieldsList, unlistFields = unlistIncludeFieldsDF$fieldName, bool_fields_key_values = bool_fields_key_values, size = 10000)
+
+singleRowExportData <- updateColumnNames(singleRowExportData)
+
+### Get trialsData data ###
+
+bool_fields_key_values <- setNames(as.list(c("pharmaintelligencecenter", "trialsdata")), c("_index", "_type"))
+
+checkData <- getData(queryOptions$singleSelect(size=1000, bool_fields_key_values = bool_fields_key_values)) |> pluck("hits", "hits")
+
+fieldsDataFrame <- structureToDataFrame(checkData)
+
+write.excel(fieldsDataFrame)
+
+includeFieldsDF <- read_excel("001-virtualDCT/dataAnalysis/dataStructureExtracts.xlsx",sheet = "trialsData")|>
+  filter(include == "TRUE")
+unlistIncludeFieldsDF <- filter(includeFieldsDF, variableType %in% c("singleList", "listOfLists"))
+includeFieldsList <- lapply(includeFieldsDF$fieldName, function(x) {paste0('"',x,'"') })
+
+loopsNumb <- round(getMaxValue("clinicalId", bool_fields_key_values)$value, -4)/10000+1
+
+trialsData <- loopSelectQueryAndBindData("clinicalId", loopsNumb, fieldsList = includeFieldsList, unlistFields = unlistIncludeFieldsDF$fieldName, bool_fields_key_values = bool_fields_key_values, size = 10000)
+
+trialsData <- updateColumnNames(trialsData)
+
+
+### Combine data ###
+
+combinedData <- merge(x = trialsData, y = singleRowExportData, by = "clinicalId", all.x = TRUE)
+
+### Copy data out to csv for future use ###
+
+write.table(combinedData, paste0("unfilteredDataExports/clinicalTrialsDataUnfilteredExport-",toString(Sys.Date()),".csv"), row.names = FALSE, col.names = TRUE, sep = ",")
+
+### Remove variables 
+
+rm(bool_fields_key_values, includeFieldsDF, includeFieldsList, queryOptions, singleRowExportData, trialsData, unlistIncludeFieldsDF)

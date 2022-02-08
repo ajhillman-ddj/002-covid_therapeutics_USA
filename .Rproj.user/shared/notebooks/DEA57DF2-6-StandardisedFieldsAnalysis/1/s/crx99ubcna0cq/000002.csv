@@ -1,0 +1,15 @@
+"0","```r
+filteredData <- mutate(filteredData, quarter = case_when(
+  monthTrialStart <= 3 ~ 1,
+  monthTrialStart <= 6 ~ 2,
+  monthTrialStart <= 9 ~ 3,
+  monthTrialStart <= 12 ~ 4,
+  TRUE ~ NULL
+))
+
+```"
+"1","Error: Problem with `mutate()` column `quarter`.
+i `quarter = case_when(...)`.
+x subscript out of bounds
+Run `rlang::last_error()` to see where the error occurred.
+"

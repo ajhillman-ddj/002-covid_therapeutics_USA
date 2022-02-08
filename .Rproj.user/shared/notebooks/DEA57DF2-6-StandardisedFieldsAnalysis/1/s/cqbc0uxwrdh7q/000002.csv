@@ -1,0 +1,16 @@
+"0","```r
+companiesCTypeDF <- companiesCTypeDF |>
+  group_by(companyName, ctype) |>
+  summarise(countOfTrials = n()) |>
+  pivot_wider(names_from = \"ctype\", values_from = \"countOfTrials\") |>
+  mutate(ctype = case_when(
+    `3` > `1` & `3` > `2` ~ \"CRO\",
+    `1` > `2` ~ \"Commercial\",
+    TRUE ~ \"Academic/Institution\"
+  ))
+```"
+"1","`summarise()` has grouped output by 'companyName'. You can override using the `.groups` argument.
+"
+"0","```r
+companiesData <- merge(x = companiesData, y = companiesCTypeDF[c(\"companyName\", \"ctype\")], by = \"companyName\", all.x = TRUE)
+```"

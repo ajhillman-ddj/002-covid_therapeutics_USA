@@ -1,0 +1,7 @@
+"0","therapeuticsDistributionData <- read_excel(""01-dataCollection/03-distributionData/PHE-Historical data collection.xlsx"", sheet = ""CombinedData"")"
+"0",""
+"0","cityPopulationData <- read.csv(""01-dataCollection/SUB-EST2020_ALL.csv"")"
+"0",""
+"0","statePopData <- read.csv(""01-dataCollection/nst-est2020.csv"")"
+"0",""
+"0","stateCasesData <- read.csv(""01-dataCollection/01-stateCasesData/United_States_COVID-19_Cases_and_Deaths_by_State_over_Time.csv"")"

@@ -1,0 +1,286 @@
+---
+title: "002-covid_therapeutics_USA"
+output:
+html_document:
+df_print: paged
+---
+
+<br><br><br>
+
+#### Load packages
+```{r}
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(rlist)
+```
+
+<br><br><br>
+
+#### Data sources
+
+<br>
+
+therapeuticsData from 'https://healthdata.gov/Health/COVID-19-Public-Therapeutic-Locator/rxn6-qnx8/'
+
+citypopulationData (for cities)  from 'https://www2.census.gov/programs-surveys/popest/datasets/2010-2020/cities/'
+
+therapeuticsDistributionData from 'https://www.phe.gov/emergency/events/COVID19/therapeutics/distribution/Pages/data-tables.aspx'
+
+statePopData from 'https://www2.census.gov/programs-surveys/popest/datasets/2020-2021/state/totals/'
+
+stateCasesData from 'https://data.cdc.gov/Case-Surveillance/United-States-COVID-19-Cases-and-Deaths-by-State-o/9mfq-cb36/data'
+
+<br><br><br>
+
+#### Load in therapeutics data, combine, add date fields, tidy up
+```{r}
+therapeuticsFileNames <- list.files("01-dataCollection/02-availableCoursesData", pattern="*.csv", full.names=TRUE)
+
+therapeuticsData <- lapply(therapeuticsFileNames, function(x) {
+  
+  rowDate <- substr(str_split(x, "_", n = Inf, simplify = FALSE)[[1]][[2]], 1, 10)  
+  
+  dailyData <- read.csv(x) |>
+    mutate(rowDate = rowDate)
+
+}) |>
+  bind_rows() |>
+  mutate(rowYear = format(as.Date(rowDate, format="%Y-%m-%d"),"%Y")) |>
+  mutate(monthYear = format(as.Date(rowDate, format="%Y-%m-%d"),"%m")) |>
+  mutate(City = str_to_title(City)) |>
+  filter(!is.na(Courses.Available))
+```
+
+<br><br><br>
+
+#### Load in other data
+```{r}
+therapeuticsDistributionData <- read_excel("01-dataCollection/03-distributionData/PHE-Historical data collection.xlsx", sheet = "CombinedData")
+
+cityPopulationData <- read.csv("01-dataCollection/SUB-EST2020_ALL.csv")
+
+statePopData <- read.csv("01-dataCollection/nst-est2020.csv")
+
+stateCasesData <- read.csv("01-dataCollection/01-stateCasesData/United_States_COVID-19_Cases_and_Deaths_by_State_over_Time.csv")
+```
+
+<br><br><br>
+
+#### Aggregate 2022 and last seven days Covid-19 case data
+```{r}
+statesCasesData <- stateCasesData |>
+  mutate(rowDate = as.Date(submission_date, format="%m/%d/%Y")) |>
+  mutate(dateYear = format(rowDate,"%Y")) |>
+  mutate(dateMonth = format(rowDate,"%m")) |>
+  mutate(daysFromLastSubmission = as.numeric(str_replace(difftime(max(rowDate), rowDate, units = "days"), " days", "")))
+
+statesCases2022Data <- statesCasesData |>
+  filter(dateYear >= 2022) |>
+  group_by(state) |>
+  summarise(cases2022 = sum(new_case))
+
+statesCasesLastSevenDays <- statesCasesData |>
+  filter(daysFromLastSubmission < 7) |>
+  group_by(state) |>
+  summarise(casesLastSevenDays = sum(new_case))
+
+statesCasesCombined <- merge(x = statesCases2022Data, y = statesCasesLastSevenDays, by = "state", all.x = TRUE)
+```
+
+<br><br><br>
+
+#### Tidy up state and city population data
+```{r}
+statePopData <- statePopData |>
+  mutate(stateCode = state.abb[match(NAME,state.name)]) |>
+  filter(!is.na(stateCode))
+
+cityPopulationData <- cityPopulationData |>
+  mutate(stateCode = state.abb[match(STNAME,state.name)]) |>
+  filter(grepl(" city", NAME, fixed = TRUE) & POPESTIMATE2020 > 10000) |>
+  mutate(cityName = str_to_title(str_replace(NAME, " city", "")))
+
+cityPopulationData <- cityPopulationData[c('cityName', 'stateCode', 'POPESTIMATE2020')]
+cityPopulationData <- cityPopulationData[order(-cityPopulationData$POPESTIMATE2020),]
+cityPopulationData <- cityPopulationData[!duplicated(cityPopulationData$cityName, cityPopulationData$stateCode),]
+```
+
+<br><br><br>
+
+#### Therapeutics analysis by date (by state and by city)
+```{r}
+byDateTherapeuticsAnalysis <- lapply(unique(therapeuticsData$rowDate), function(x) {
+  
+  filteredData <- filter(therapeuticsData, rowDate == x)
+  
+  output <- list()
+  
+  output[['date']] <- x
+  
+  statesAnalysis <- filteredData |>
+    group_by(Order.Label, State.Code) |>
+    summarise(count = sum(Courses.Available)) |>
+    pivot_wider(names_from = Order.Label, values_from = count)
+    
+  statesAnalysis[is.na(statesAnalysis)] <- 0
+  
+  statesAnalysis <- merge(x = statesAnalysis, y = statesCasesCombined, by.x = "State.Code", by.y = "state", all.x = TRUE)
+  
+  statesAnalysis <- merge(x = statesAnalysis, y = statePopData[c("stateCode", "POPESTIMATE2020")], by.x = "State.Code", by.y = "stateCode", all.x = TRUE) |>
+    filter(!is.na(POPESTIMATE2020))
+  
+  statesAnalysis <- statesAnalysis |>
+    mutate(cases2022Share = cases2022/sum(statesAnalysis$cases2022)) |>
+    mutate(cases7DaysShare = casesLastSevenDays/sum(statesAnalysis$casesLastSevenDays)) |>
+    mutate(paxlovidShare = Paxlovid/sum(statesAnalysis$Paxlovid)) |>
+    mutate(molnupiravirShare = Molnupiravir/sum(statesAnalysis$Molnupiravir)) |>
+    mutate(pPlusMShare = (Paxlovid+Molnupiravir)/(sum(statesAnalysis$Paxlovid)+sum(statesAnalysis$Molnupiravir))) |>
+    mutate(populationShare = POPESTIMATE2020/sum(statesAnalysis$POPESTIMATE2020)) |>
+    mutate(cases2022Per100000 = cases2022*100000/POPESTIMATE2020) |>
+    mutate(cases7DaysPer100000 = casesLastSevenDays*100000/POPESTIMATE2020) |>
+    mutate(paxlovidCoursesPer100000 = Paxlovid*100000/POPESTIMATE2020) |>
+    mutate(molnupiravirCoursesPer100000 = Molnupiravir*100000/POPESTIMATE2020) |>
+    mutate(pPlusMCoursesPer100000 = (Paxlovid+Molnupiravir)*100000/POPESTIMATE2020) |>
+    mutate(cases7DaysPerPaxlovid = casesLastSevenDays/Paxlovid) |>
+    mutate(cases7DaysPerMolnupiravir = casesLastSevenDays/Molnupiravir) |>
+    mutate(cases7DaysperPPlusM = casesLastSevenDays/(Paxlovid+Molnupiravir) ) |>
+    mutate(rowDate = x)
+  
+  statesAnalysis <- statesAnalysis[order(-statesAnalysis$pPlusMCoursesPer100000),]
+  
+  output[['statesAnalysis']] <- statesAnalysis
+  
+  citiesAnalysis <- filteredData |>
+    group_by(Order.Label, State.Code, City) |>
+    summarise(count = sum(Courses.Available)) |>
+    pivot_wider(names_from = Order.Label, values_from = count)
+  
+  citiesAnalysis[is.na(citiesAnalysis)] <- 0
+  
+  citiesAnalysis <- merge(x = citiesAnalysis, y = cityPopulationData, by.x=c('City', 'State.Code'), by.y=c('cityName', 'stateCode'), all.x = TRUE)|>
+    mutate(paxlovidShare = Paxlovid/sum(statesAnalysis$Paxlovid)) |>
+    mutate(molnupiravirShare = Molnupiravir/sum(statesAnalysis$Molnupiravir)) |>
+    mutate(pPlusMShare = (Paxlovid+Molnupiravir)/(sum(statesAnalysis$Paxlovid)+sum(statesAnalysis$Molnupiravir))) |>
+    mutate(populationShare = POPESTIMATE2020/sum(statesAnalysis$POPESTIMATE2020)) |>
+    mutate(paxlovidCoursesPer100000 = Paxlovid*100000/POPESTIMATE2020) |>
+    mutate(molnupiravirCoursesPer100000 = Molnupiravir*100000/POPESTIMATE2020) |>
+    mutate(pPlusMCoursesPer100000 = (Paxlovid+Molnupiravir)*100000/POPESTIMATE2020) |>
+    mutate(rowDate = x)
+  
+  citiesAnalysis <- filter(citiesAnalysis, POPESTIMATE2020 > 200000)
+  citiesAnalysis <- citiesAnalysis[order(-citiesAnalysis$pPlusMCoursesPer100000),]
+  
+  output[['citiesAnalysis']] <- citiesAnalysis
+  
+  return(output)
+})
+```
+
+
+<br><br><br>
+
+#### Data extraction (just used for checking which states/figures to include in the copy)
+```{r}
+dataExtraction1 <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]]
+
+write.table(dataExtraction1, "02-rOutputs/dataExtraction1.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```
+
+<br><br><br>
+
+#### Graph 1 - Covid-19 cases per course - last 7 days (states)
+```{r}
+graph1Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]][c("State.Code", "cases7DaysPerPaxlovid", "cases7DaysPerMolnupiravir", "cases7DaysperPPlusM")]
+
+write.table(graph1Data, "02-rOutputs/graph1Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```
+
+<br><br><br>
+
+#### Graph 2 - Available courses per 100,000 (states)
+```{r}
+graph2Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]][c("State.Code", "paxlovidCoursesPer100000", "molnupiravirCoursesPer100000", "pPlusMCoursesPer100000")]
+
+write.table(graph2Data, "02-rOutputs/graph2Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```
+
+<br><br><br>
+
+#### Graph 3 - Correlation of courses to cases (states)
+```{r}
+graph3Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]][c("State.Code", "cases7DaysPer100000", "cases2022Per100000", "paxlovidCoursesPer100000", "molnupiravirCoursesPer100000", "pPlusMCoursesPer100000")]
+
+write.table(graph3Data, "02-rOutputs/graph3Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```
+
+<br><br><br>
+
+#### Graph 4 - Available course by date (states)
+```{r}
+graph4Data <- lapply(byDateTherapeuticsAnalysis, function(x) {
+  
+  output <- x[["statesAnalysis"]][c("State.Code", "paxlovidCoursesPer100000", "rowDate")]
+}) |>
+  bind_rows() |>
+  pivot_wider(names_from = "rowDate", values_from = "paxlovidCoursesPer100000")
+
+write.table(graph4Data, "02-rOutputs/graph4Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```
+
+<br><br><br>
+
+#### Graph 5 - Available course by date (states)
+```{r}
+graph5Data <- lapply(byDateTherapeuticsAnalysis, function(x) {
+  
+  output <- x[["statesAnalysis"]][c("State.Code", "molnupiravirCoursesPer100000", "rowDate")]
+}) |>
+  bind_rows() |>
+  pivot_wider(names_from = "rowDate", values_from = "molnupiravirCoursesPer100000")
+
+write.table(graph5Data, "02-rOutputs/graph5Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```
+
+<br><br><br>
+
+#### Graph 6 - state distribution analysis by date 
+```{r}
+therapeuticsDistributionData <- therapeuticsDistributionData |>
+  mutate(stateCode = state.abb[match(NameGrouped,state.name)]) |>
+  filter(!is.na(stateCode)) 
+
+therapeuticsDistributionData <- merge(x = therapeuticsDistributionData, y = statePopData[c("stateCode", "POPESTIMATE2020")], by.x = "stateCode", by.y = "stateCode", all.x = TRUE) |>
+  mutate(dosesPer100000 = DoseNumbers*100000/POPESTIMATE2020)
+
+graph6Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-01-24') [[1]][["statesAnalysis"]][c("State.Code","paxlovidCoursesPer100000", "molnupiravirCoursesPer100000", "pPlusMCoursesPer100000")]
+
+unique(therapeuticsDistributionData$TherapeuticGrouped)
+
+paxlovidDistributionData <- therapeuticsDistributionData |>
+  filter(TherapeuticGrouped == 'Paxlovid') |>
+  group_by(DateMidpoint, stateCode) |>
+  summarise(count = sum(dosesPer100000)) |>
+  pivot_wider(names_from = 'DateMidpoint', values_from = 'count')
+
+paxlovidDistributionData <- merge(x = paxlovidDistributionData, y = graph6Data[c("State.Code", "paxlovidCoursesPer100000")], by.x = "stateCode", by.y = "State.Code", all.x = TRUE)
+
+write.table(paxlovidDistributionData, "02-rOutputs/graph6Data-i.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+
+molnupiravirDistributionData <- therapeuticsDistributionData |>
+  filter(TherapeuticGrouped == 'Molnupiravir') |>
+  group_by(DateMidpoint, stateCode) |>
+  summarise(count = sum(dosesPer100000)) |>
+  pivot_wider(names_from = 'DateMidpoint', values_from = 'count')
+
+molnupiravirDistributionData <- merge(x = molnupiravirDistributionData, y = graph6Data[c("State.Code", "molnupiravirCoursesPer100000")], by.x = "stateCode", by.y = "State.Code", all.x = TRUE)
+
+write.table(molnupiravirDistributionData, "02-rOutputs/graph6Data-ii.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```
+
+<br><br><br>
+
+#### Get lookup data for population and state name (for graphs)
+```{r}
+write.table(statePopData[c("NAME", "stateCode", "POPESTIMATE2020")], "02-rOutputs/stateNamePopLookup.csv", row.names = FALSE, col.names = TRUE, sep = ",")
+```

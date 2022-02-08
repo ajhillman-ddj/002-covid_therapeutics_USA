@@ -1,0 +1,11 @@
+"0","
+write.table(usCasesData[c('stateCode', 'currentCasesShare', 'X7.Day.Cases.Rate.per.100000')], ""rOutputs/quickData.csv"", row.names = FALSE, col.names = TRUE, sep = "","")
+"
+"2","Warning in file(file, ifelse(append, ""a"", ""w"")) :"
+"2","
+ "
+"2"," cannot open file 'rOutputs/quickData.csv': Permission denied
+"
+"2","Error in file(file, ifelse(append, ""a"", ""w"")) : 
+  cannot open the connection
+"

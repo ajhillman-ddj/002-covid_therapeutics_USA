@@ -1,0 +1,585 @@
+---
+title: "DataExtractionCleaning"
+author: "Andrew Hillman"
+date: "01/11/2021"
+output: html_document
+---
+
+<br><br>
+
+### Load libraries
+```{r}
+library(purrr)
+library(listviewer)
+library(tibble)
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(httr)
+library(glue)
+library(autograph)
+```
+
+<br>
+
+### Define functions for importing data from Elasticsearch and manipulating it into a dataframe
+
+<br>
+createTermsList takes a list of key-value paires (in list of length 2) and creates a string of 'terms' - conditions that need to be met (i.e. the where clause part of the query)
+```{r}
+createTermsList = function(key_values) {
+  
+  string = ''
+  
+  for (row in key_values) {
+    string <- paste0(string, '{"terms": {"', row[[1]],'": ["', row[[2]],'"]}},' )
+  }
+  
+  string <- substr(string,1,nchar(string)-1)
+}
+```
+
+<br>
+queryOptions is a list of functions  - each takes inputs and creates a string which is an executable elasticsearch query
+```{r}
+queryOptions <- list(
+  
+  singleSelect = function(bool_fields_key_values = list(), selected_fields = '"*"', size = 5, bool = "must") {
+    
+    paste0('{ "size": ', size,', 
+      "_source": [', selected_fields,'],
+      "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),   
+           ']}}
+      }') },
+  
+  singleAggregation = function(aggregation_field, bool_fields_key_values = list(), size = 100, bool="must") {
+    
+    paste0('{ "size": 0, 
+      "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),   
+           ']}},
+      "aggs": {"aggregatedData": {"terms": {"field": "',aggregation_field,'", "size": ', size,'}
+      }}
+} ') },
+
+  doubleAggregation = function(aggregation_field1, aggregation_field2, bool_fields_key_values = list(), size = 9999, bool = "must") {
+    
+    paste0('{ "size": 0, 
+    "query": {"bool": { "', bool,'": [', createTermsList(bool_fields_key_values),   
+           ']}},
+    "aggs": {
+      "agg1": {
+        "terms": {
+          "field": "', aggregation_field1, '", "size": ', size,'},
+    "aggs": {
+      "agg2": {
+        "terms": {
+          "field": "', aggregation_field2, '", "size": ', size,'}
+      }}}}}
+}') }
+)
+```
+
+<br>
+getData passes the query to Elasticsearch and receives the response
+```{r}
+getData <- function(queryType) {
+  print(queryType)
+  
+  #our modifiable ES query is pulled from the queryOptions object
+  query <- glue::glue(queryType,  .open = "<<", .close = ">>")
+  #hit the server
+  response <-
+    POST(
+      "http://filings.elasticsearch.production.pdm.local:9200/filingsnew/_search",
+      body = query,
+      encode = "json"
+    )
+  #extract the data
+  data <- content(response)
+}
+```
+
+<br>
+
+this is a function for extracting data (using getData) with a double aggregation query and manipulating it into a dataframe 
+```{r}
+dataExtractionAndManipulation <- list(
+  
+  doubleAggregation = function(aggregation_field1, aggregation_field2, bool_fields_key_values = list(), size = 9999, bool = "must") {
+    
+    raw_data_extract <- getData(queryOptions$doubleAggregation(aggregation_field1, aggregation_field2, bool_fields_key_values, size, bool))
+
+    deepest_level_data <- raw_data_extract |> pluck("aggregations","agg1","buckets") |>
+           lapply(function(x) {x |> pluck("agg2", "buckets")})
+    
+    top_level_data <- raw_data_extract |> pluck("aggregations","agg1","buckets") |>
+          lapply(function(x) { list(x[[1]], x[[2]])})
+    
+    for (i in seq_along(deepest_level_data)) {
+    
+          field1 <- top_level_data[[i]][[1]]
+
+          deepest_level_data[[i]] <- lapply(deepest_level_data[[i]], function(x, fieldName) { list(aggregation_field2=x[[1]], "countOfRecords"=x[[2]], aggregation_field1=fieldName) }, field1) 
+    }
+    
+    data_df <- flatten(deepest_level_data) |> plyr::ldply(data.frame)
+  }
+  
+  
+)
+```
+
+<br>
+
+## Import data and set template parameters
+
+<br>
+
+```{r}
+siteInfoList <- autograph::gd_sites()
+
+siteAdditionalInfo <- read_csv("Inputs/SiteAdditionalInfo.csv")
+siteInfoList <- merge(x = siteInfoList, y = siteAdditionalInfo, by = "site", all.x = TRUE)
+
+companyList <- read_csv("https://docs.google.com/spreadsheets/d/e/2PACX-1vTIxjkgrHfwhE8UQm8OM9SvYniwGexF9kJRFWz1WHOXUUFiG84sLVCOSNH4nGSoY8XPPp6hLRuWEwD8/pub?gid=809002894&single=true&output=csv",col_types = cols())
+
+mainThemesList <- read_csv("Inputs/MainThemesLookupV3.csv")
+subThemesList <- read_csv("Inputs/SubThemesLookup.csv")
+yearQuarterLookup <- read_csv("Inputs/YearQuarterLookup.csv")
+regionLookup <- read_csv("Inputs/RegionLookup.csv")
+```
+
+<br>
+
+
+Here the user needs to set the most recent quarter of data to be analysed - note that company filings for the most recent quarter are likely to be incomplete.
+
+<br>
+
+```{r}
+lastQuarter <- filter(yearQuarterLookup, Quarter == "Q3 2021")
+
+oneYearAgoQuarter <- filter(yearQuarterLookup, ID == lastQuarter$ID-4)
+lastFourQuarters <- filter(yearQuarterLookup, ID <= lastQuarter$ID, ID > lastQuarter$ID-4)
+allActiveQuarters <- filter(yearQuarterLookup, ID <= lastQuarter$ID)
+quarters2016 <- filter(yearQuarterLookup, Year == 2016)
+```
+
+<br>
+
+Here the user needs to set the theme.
+
+<br>
+
+```{r}
+theme <- 'Supply Chain & Logistics'
+
+mainThemeInfo <- filter(mainThemesList, themeName == theme)
+subThemesList <- filter(subThemesList, parentTheme == theme)
+```
+
+<br>
+
+## Query the data and manipulate into easy-to-use data tables
+
+<br>
+
+Query to receive a count of filing sentences by filingId, once with no condition and once where the theme must match the active theme - then join data into a single table
+
+<br>
+
+```{r}
+all_sentences_by_company_by_quarter <- as.list(yearQuarterLookup$Quarter) |>
+  lapply(function(y) {
+
+  dataExtractionAndManipulation$doubleAggregation("filingQuarter", "filingId", bool_fields_key_values = list(list("recordType.keyword", "FilingsSentence"), list("filingQuarter", y)), size=99999)
+  })
+
+all_sentences_by_company_by_quarter <- do.call(rbind, all_sentences_by_company_by_quarter)
+colnames(all_sentences_by_company_by_quarter) <- c("filingId", "allRecords", "filingQuarter")
+  
+
+theme_tagged_sentences_by_company_by_quarter <- as.list(yearQuarterLookup$Quarter) |>
+  lapply(function(y) {
+  
+  dataExtractionAndManipulation$doubleAggregation("filingQuarter", "filingId", bool_fields_key_values = list(list("recordType.keyword", "FilingsSentence"), list("themeMentionIds", mainThemeInfo$themeId), list("filingQuarter", y)), size=99999)
+  })
+
+theme_tagged_sentences_by_company_by_quarter <- do.call(rbind, theme_tagged_sentences_by_company_by_quarter)
+colnames(theme_tagged_sentences_by_company_by_quarter) <- c("filingId", "themeRecords", "filingQuarter")
+
+joined_sentences_by_company_by_quarter <- merge(x = all_sentences_by_company_by_quarter, y = theme_tagged_sentences_by_company_by_quarter, by = c("filingId", "filingQuarter"), all.x = TRUE)
+
+rm(all_sentences_by_company_by_quarter, theme_tagged_sentences_by_company_by_quarter)
+
+```
+
+
+<br>
+
+Grab the number of employees for each company - code taken without edits from the jobs-monthly-leaderboards template.
+
+<br>
+
+```{r}
+ids <- unique(companyList$CompanyID)
+# Use the function above to gather workforce data
+# Function for gathering data on employee numbers
+getWorkforce <- function(queryIds) {
+  
+  # Construct our ES query here with interpolated data
+  query <- glue('{ 
+               "size": <<length(queryIds)>>,
+               "_source": ["companyId", "companyName", "totalEmployees"], 
+                "query": {"bool": { "must": [ 
+                      {"terms": {"companyId": [<<paste(queryIds, collapse=",\n")>>]}}
+                ]}}
+              }',  .open = "<<", .close = ">>") # adding custom interpolation markers here to play better with JSON
+  
+  # Send our query to elasticsearch
+  response <- POST("http://iccloudbackup.elasticsearch.production.pdm.local:9200/intelligencecenter/company/_search",
+                   body = query,
+                   encode = "json")
+  
+  # Extract the main results list from our query response
+  listData <- content(response)$hits$hits
+  
+  # Take our results list and turn it into a dataframe
+  parsedData <- listData %>%
+    map(., 5) %>%
+    tibble(
+      companyID = map_chr(., "companyId"),
+      companyName = map_chr(., "companyName"),
+      employees = map_int(., "totalEmployees")
+    ) %>%
+    select(-.)
+  
+  return(parsedData)
+}
+
+workforceData <- getWorkforce(ids[1:1000])
+
+for(i in 2:ceiling(length(ids)/1000)) {
+  start <- (i-1)*1000 + 1
+  end <- i*1000
+  workforceData <- bind_rows(workforceData, getWorkforce(ids[start:end][!is.na(ids[start:end])]))
+}
+
+```
+
+<br>
+
+Grab a lookup of unique filing ids to companies, then join the workforce data to the company data and the company data to the main data extracts
+
+<br>
+
+```{r}
+filingIdCompanyLookup <- as.list(yearQuarterLookup$Quarter)
+
+filingIdCompanyLookup <- lapply(filingIdCompanyLookup, function(y) {
+  
+  getData(queryOptions$singleSelect(size=99999, selected_fields='"filingId", "companyId"', bool_fields_key_values = list(list("recordType.keyword", "Filings"), list("filingQuarter", y)))) |>
+  pluck("hits", "hits") |>
+  lapply(function(x) {
+  x[["_index"]] <- NULL
+  x[["_type"]] <- NULL
+  x[["_id"]]<- NULL
+  x[["_score"]] <- NULL
+  return(x)
+  }) |>
+  plyr::ldply(data.frame)
+}) 
+
+filingIdCompanyLookup <- do.call(rbind, filingIdCompanyLookup) |>
+  unique()
+
+colnames(filingIdCompanyLookup) <- c("companyId", "filingId")
+
+filingIdCompanyLookup <- merge(x = filingIdCompanyLookup, y = companyList, by.x = "companyId", by.y = "CompanyID", all = TRUE) |>
+  filter(!is.na(`Company Name`), !is.na(Site))
+
+filingIdCompanyLookup <- merge(x = filingIdCompanyLookup, y = workforceData[c("companyID", "employees")], by.x = "companyId", by.y = "companyID", all.x = TRUE)
+
+filingIdCompanyLookup <- merge(x = filingIdCompanyLookup, y = regionLookup, by.x = "HQ", by.y = "Country", all.x = TRUE)
+
+joined_sentences_by_company_by_quarter <- merge(x = joined_sentences_by_company_by_quarter, y = filingIdCompanyLookup[c("filingId", "companyId", "Site")], by = "filingId", all = TRUE) |>
+  filter(!is.na(`companyId`), !is.na(Site))
+
+joined_sentences_by_company_by_quarter[c("themeRecords")][is.na(joined_sentences_by_company_by_quarter[c("themeRecords")])] <- 0
+
+joined_sentences_by_company_by_quarter <- filter(joined_sentences_by_company_by_quarter, !is.na(filingQuarter))
+```
+
+<br>
+
+If there are a sufficient number of subthemes to potentially justify a subtheme section in the text, then this code will extract filing sentences by subtheme by quarter
+
+<br>
+
+```{r}
+if (mainThemeInfo$useSubThemes > 0) {
+  
+  sub_theme_tagged_sentences_by_company_by_quarter <- lapply(subThemesList$themeId, function(x) { dataExtractionAndManipulation$doubleAggregation("filingQuarter", "filingId", bool_fields_key_values = list(list("recordType.keyword", "FilingsSentence"), list("themeMentionIds", x)), size=99999)  })
+  
+  for (i in seq_along(sub_theme_tagged_sentences_by_company_by_quarter)) {
+    
+    sub_theme_tagged_sentences_by_company_by_quarter[[i]] <- mutate(sub_theme_tagged_sentences_by_company_by_quarter[[i]], "subThemeId" = subThemesList$themeId[[i]])
+  }
+  
+  sub_theme_tagged_sentences_by_company_by_quarter <- do.call(rbind, sub_theme_tagged_sentences_by_company_by_quarter)
+
+colnames(sub_theme_tagged_sentences_by_company_by_quarter) <- c("filingId", "countOfRecords", "filingQuarter", "subThemeId")
+
+sub_theme_tagged_sentences_by_company_by_quarter <- merge(x = sub_theme_tagged_sentences_by_company_by_quarter, y = filingIdCompanyLookup[c("filingId", "companyId", "Site")], by = "filingId", all.x = TRUE)
+
+}
+```
+
+<br>
+
+## Create analysis
+
+For each site, filter to relevant company files and loop through analysis.
+
+The lapply function creates analysisList - a list of key value pairs containing the analysis used in the article.
+
+<br>
+
+
+```{r}
+
+### Exclude any sites from the list as required
+
+sitesToBeRemoved <- c("Verdict Food Service", "Investment Monitor", "Energy Monitor")
+siteInfoList <- filter(siteInfoList, !site %in% sitesToBeRemoved)
+
+rm(analysisList)
+
+
+sitesList <- siteInfoList$site
+
+analysisList <- lapply(sitesList, function(x) {
+  
+  output <- list()
+  output[["site"]] <- x
+  
+  ### filter to only include data associated with companies in the relevant sector
+  
+  filtered_data <- filter(joined_sentences_by_company_by_quarter, Site == x)
+  
+  if (mainThemeInfo$useSubThemes > 0) {
+  
+    filtered_sub_theme_data <- filter(sub_theme_tagged_sentences_by_company_by_quarter, Site == x)
+  }
+  
+  filtered_company_data <- filter(unique(filingIdCompanyLookup[c("companyId", "Company Name", "Site", "employees", "HQ", "Region")]), Site == x)
+  
+  ### by quarter and by yearly analysis
+  
+  by_quarter_data <- filter(filtered_data, filingQuarter %in% allActiveQuarters$Quarter) |>
+    group_by(filingQuarter) |>
+    summarise(allRecords = sum(allRecords), themeRecords = sum(themeRecords)) |>
+    mutate(ratio = round(100*(themeRecords / allRecords), 3))
+    
+  by_quarter_data <- merge(x = by_quarter_data, y = allActiveQuarters, by.x = "filingQuarter", by.y = "Quarter", all.x = TRUE)
+  
+  by_quarter_data <- by_quarter_data[order(by_quarter_data$ID), ]
+  
+  output[["quarterly_data"]] <- by_quarter_data[c("filingQuarter", "themeRecords", "allRecords", "ratio")]
+  
+  ### overall ratio for past twelve months analysis
+  
+  last_twelve_months_data <- filter(by_quarter_data, filingQuarter %in% lastFourQuarters$Quarter) |>
+    summarise(allRecords = sum(allRecords), themeRecords = sum(themeRecords)) |>
+    mutate(ratio = round(100*(themeRecords / allRecords), 3))
+  
+  output[["last_twelve_months_data"]] <- last_twelve_months_data
+  
+  ### overall ratio for 2016 analysis
+  
+  data_2016 <- filter(by_quarter_data, Year == 2016) |>
+    summarise(allRecords = sum(allRecords), themeRecords = sum(themeRecords)) |>
+    mutate(ratio = round(100*(themeRecords / allRecords), 3))
+  
+  output[["data_2016"]] <- data_2016
+  
+  ### pulling data on overall ratio of mentions for specific quarters (most recent, the one before that and the one a year ago)
+  
+  output[["current_quarter_data"]] <- filter(by_quarter_data, filingQuarter == lastQuarter$Quarter)
+  output[["previous_quarter_data"]] <- filter(by_quarter_data, ID == lastQuarter$ID - 1)
+  output[["one_year_ago_quarter_data"]] <- filter(by_quarter_data, ID == lastQuarter$ID - 4)
+
+  
+  ### analysis of theme mentions by companies in the sector
+
+  last_twelve_months_data_grouped_by_company <- filter(filtered_data, filingQuarter %in% lastFourQuarters$Quarter) |>
+    group_by(companyId) |>
+    summarise(allRecords = sum(allRecords), themeRecords = sum(themeRecords))
+  
+  last_twelve_months_data_grouped_by_company[c("themeRecords")][is.na(last_twelve_months_data_grouped_by_company[c("themeRecords")])] <- 0
+  
+  ### calculate the % of companies have mentioned the theme at least once in the past twelve months - excludes companies with relatively few tagged sentences 
+  
+  output[["total_companies_count_ltm"]] <- nrow(last_twelve_months_data_grouped_by_company)
+  
+  last_twelve_months_data_grouped_by_company <- filter(last_twelve_months_data_grouped_by_company, allRecords > 500)
+  
+  output[["filtered_companies_count_ltm"]] <- nrow(last_twelve_months_data_grouped_by_company)
+  
+  output[["filtered_companies_count_with_theme_records_ltm"]] <- nrow(filter(last_twelve_months_data_grouped_by_company, themeRecords > 0))
+  
+  ### repeat analysis above but for 2016 data
+  
+  grouped_by_company_2016_data <- filter(filtered_data, filingQuarter %in% quarters2016$Quarter) |>
+    group_by(companyId) |>
+    summarise(allRecords = sum(allRecords), themeRecords = sum(themeRecords))
+  
+  grouped_by_company_2016_data[c("themeRecords")][is.na(grouped_by_company_2016_data[c("themeRecords")])] <- 0
+  
+  ### calculate the % of companies have mentioned the theme at least once in 2016 - excludes companies with relatively few tagged sentences 
+  
+  output[["total_companies_count_2016"]] <- nrow(grouped_by_company_2016_data)
+  
+  grouped_by_company_2016_data <- filter(grouped_by_company_2016_data, allRecords > 500)
+  
+  output[["filtered_companies_count_2016"]] <- nrow(grouped_by_company_2016_data)
+  
+  output[["filtered_companies_count_with_theme_records_2016"]] <- nrow(filter(grouped_by_company_2016_data, themeRecords > 0))
+  
+  ### find the top mentioning companies within the biggest X employers in the sector (during last twelve months)
+  
+  last_twelve_months_data_grouped_by_company <- merge(x = last_twelve_months_data_grouped_by_company, y = filtered_company_data, by = "companyId", all.x = TRUE) |>
+    mutate(ratio = round(100*(themeRecords / allRecords), 3))
+  
+  biggest_companies_data <- filter(last_twelve_months_data_grouped_by_company, employees > 10000)
+  
+    if (nrow(biggest_companies_data) <= 50) { biggest_companies_number <- round_any(nrow(biggest_companies_data), 10, floor) }
+  else { biggest_companies_number <- 50} 
+  
+  biggest_companies_data <- biggest_companies_data[order(-biggest_companies_data$employees),] |>
+    head(biggest_companies_number)
+  
+  biggest_companies_data_top_five <- biggest_companies_data[order(-biggest_companies_data$ratio),] |>
+    head(5)
+  
+  biggest_companies_data_top_five <- filter(biggest_companies_data_top_five, ratio > 0)
+  
+  output[["biggest_companies_data"]] <- biggest_companies_data_top_five
+  output[["biggest_companies_number"]] <- biggest_companies_number
+  
+  ### find the file with the highest mentions ratio from the most recent quarter
+
+  last_quarter_top_file <- filter(filtered_data, filingQuarter == lastQuarter$Quarter, allRecords > 1000) |>
+    mutate(ratio = round(100*(themeRecords / allRecords), 3))
+  
+  last_quarter_top_file <- last_quarter_top_file[order(-last_quarter_top_file$ratio), ] |>
+    head(1)
+  
+  last_quarter_top_file <- merge(x = last_quarter_top_file, y = filtered_company_data, by = "companyId", all.x = TRUE)
+  
+  output[["last_quarter_top_file"]] <- last_quarter_top_file
+  
+  #### if using subthemes - calculate subtheme mentions by year as a share of all theme mentions
+  
+  output[["sub_themes_by_year"]] <- NULL
+  
+  if (mainThemeInfo$useSubThemes > 0) {
+    
+    sub_theme_by_year <- filter(filtered_sub_theme_data, filingQuarter %in% allActiveQuarters$Quarter) 
+    
+    sub_theme_by_year <- merge(x = sub_theme_by_year, y = allActiveQuarters, by.x = "filingQuarter", by.y = "Quarter", all.x = TRUE)
+    
+    sub_theme_by_year <- sub_theme_by_year |>
+      group_by(Year, subThemeId) |>
+      summarise(countOfRecords = sum(countOfRecords))
+    
+    all_sub_themes_by_year <- sub_theme_by_year |>
+      group_by(Year) |>
+      summarise(totalMentions = sum(countOfRecords))
+     
+    sub_theme_by_year <- merge(x = sub_theme_by_year, y = all_sub_themes_by_year[c("Year", "totalMentions")], by = "Year", all.x = TRUE) |>
+      mutate(share = round(100*(countOfRecords/totalMentions), 3))
+    
+    sub_theme_by_year <- merge(x = sub_theme_by_year, y = subThemesList[c("themeName", "themeId")], by.x = "subThemeId", by.y = "themeId", all.x = TRUE) 
+    
+    sub_theme_total_share_check <- sub_theme_by_year |>
+      group_by(subThemeId) |>
+      summarise(countOfRecords = sum(countOfRecords), totalMentions = sum(totalMentions))
+    
+    sub_theme_total_share_check["totalMentionsAll"] = max(sub_theme_total_share_check$totalMentions)
+    
+    sub_theme_total_share_check <- mutate(sub_theme_total_share_check, share = round(100*(countOfRecords/totalMentionsAll), 3))
+    
+    sub_theme_total_share_check <- sub_theme_total_share_check[order(-sub_theme_total_share_check$share), ]
+    sub_theme_total_share_check <- head(sub_theme_total_share_check, nrow(filter(sub_theme_total_share_check, share > 10)) + 1)
+    
+    sub_theme_by_year <- filter(sub_theme_by_year, subThemeId %in% sub_theme_total_share_check$subThemeId)
+    
+    sub_theme_by_year <- sub_theme_by_year[order(sub_theme_by_year$Year), ]
+    
+    output[["sub_themes_by_year"]] <- sub_theme_by_year
+    output[["sub_themes_check"]] <- sub_theme_total_share_check
+    
+    sub_theme_by_quarter <- filter(filtered_sub_theme_data, filingQuarter %in% allActiveQuarters$Quarter) |>
+      group_by(filingQuarter, subThemeId) |>
+      summarise(countOfRecords = sum(countOfRecords))
+    
+    all_sub_themes_by_quarter <- sub_theme_by_quarter |>
+      group_by(filingQuarter) |>
+      summarise(totalMentions = sum(countOfRecords))
+    
+    sub_theme_by_quarter <- merge(x = sub_theme_by_quarter, y = all_sub_themes_by_quarter[c("filingQuarter", "totalMentions")], by = "filingQuarter", all.x = TRUE) |>
+      mutate(share = round(100*(countOfRecords/totalMentions), 3))
+    
+    sub_theme_by_quarter <- merge(x = sub_theme_by_quarter, y = subThemesList[c("themeName", "themeId")], by.x = "subThemeId", by.y = "themeId", all.x = TRUE) 
+    
+    sub_theme_by_quarter <- filter(sub_theme_by_quarter, subThemeId %in% sub_theme_total_share_check$subThemeId)
+    
+    sub_theme_by_quarter <- merge(x = sub_theme_by_quarter, y = allActiveQuarters, by.x = "filingQuarter", by.y = "Quarter", all.x = TRUE)
+    
+    sub_theme_by_quarter <- sub_theme_by_quarter[order(sub_theme_by_quarter$ID), ]
+    
+    output[["sub_themes_by_quarter"]] <- sub_theme_by_quarter
+  
+  }
+  
+  #### analysis of theme mentions by region over the past twelve months
+  
+  last_twelve_months_data_grouped_by_region <- last_twelve_months_data_grouped_by_company |>
+    group_by(Region) |>
+    summarise(allRecords = sum(allRecords), themeRecords = sum(themeRecords))
+  
+  last_twelve_months_data_grouped_by_region[c("themeRecords")][is.na(last_twelve_months_data_grouped_by_region[c("themeRecords")])] <- 0
+  
+  last_twelve_months_data_grouped_by_region <- mutate(last_twelve_months_data_grouped_by_region, ratio = round(100*(themeRecords / allRecords), 3))
+  
+  last_twelve_months_data_grouped_by_region <- filter(last_twelve_months_data_grouped_by_region, allRecords > 25000, ratio > 0.005) |>
+    filter(Region != "Bermuda")
+  
+  last_twelve_months_data_grouped_by_region <- last_twelve_months_data_grouped_by_region[order(-last_twelve_months_data_grouped_by_region$ratio),]
+  
+  output[["last_twelve_months_by_region_data"]] <- last_twelve_months_data_grouped_by_region
+
+  return(output)
+})
+```
+
+```{r}
+analysisListFiltered <- lapply(analysisList, function(x) {
+  
+  
+  if (length(filter(x[["quarterly_data"]], themeRecords > 0)) > 0 &
+      x[["last_twelve_months_data"]]$themeRecords > 0 &
+      x[["last_quarter_top_file"]]$themeRecords > 0 &
+      length(x[["last_twelve_months_by_region_data"]]) > 0
+  ) { return(x) } else { return(NULL) }
+})
+
+analysisListFiltered <- plyr::compact(analysisListFiltered)
+
+```
+
+```{r}
+rm(companyList, regionLookup, dataExtractionAndManipulation, filingIdCompanyLookup, joined_sentences_by_company_by_quarter, queryOptions, sub_theme_tagged_sentences_by_company_by_quarter, workforceData, yearQuarterLookup)
+```
+

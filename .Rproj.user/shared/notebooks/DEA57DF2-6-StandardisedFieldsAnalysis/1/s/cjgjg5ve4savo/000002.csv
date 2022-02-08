@@ -1,0 +1,95 @@
+"0","```r
+includesCommercial <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Commercial\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercial = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercial[c(\"clinicalId\", \"includesCommercial\")], by = \"clinicalId\", all.x = TRUE)
+
+includesNonProfitInstitution <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Institution/Non-profit\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitution = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesNonProfitInstitution[c(\"clinicalId\", \"includesInstitution\")], by = \"clinicalId\", all.x = TRUE)
+
+includesCommercialLarge <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Commercial\" & companySize == \"Large\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercialLarge = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercialLarge[c(\"clinicalId\", \"includesCommercialLarge\")], by = \"clinicalId\", all.x = TRUE)
+  
+
+includesCommercialMedium <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Commercial\" & companySize == \"Medium\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercialMedium = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercialMedium[c(\"clinicalId\", \"includesCommercialMedium\")], by = \"clinicalId\", all.x = TRUE)
+
+
+includesCommercialSmall <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Commercial\" & companySize == \"Small\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCommercialSmall = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCommercialSmall[c(\"clinicalId\", \"includesCommercialSmall\")], by = \"clinicalId\", all.x = TRUE)
+
+includesInstitutionSmall <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Institution/Non-profit\" & companySize == \"Small\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitutionSmall = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesInstitutionSmall[c(\"clinicalId\", \"includesInstitutionSmall\")], by = \"clinicalId\", all.x = TRUE)
+
+includesInstitutionMedium <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Institution/Non-profit\" & companySize == \"Medium\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitutionMedium = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesInstitutionMedium[c(\"clinicalId\", \"includesInstitutionMedium\")], by = \"clinicalId\", all.x = TRUE)
+
+
+includesInstitutionLarge <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"Institution/Non-profit\" & companySize == \"Large\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesInstitutionLarge = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesInstitutionLarge[c(\"clinicalId\", \"includesInstitutionLarge\")], by = \"clinicalId\", all.x = TRUE)
+
+
+includesCROLarge <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"CRO\" & companySize == \"Large\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCROLarge = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCROLarge[c(\"clinicalId\", \"includesCROLarge\")], by = \"clinicalId\", all.x = TRUE)
+
+
+includesCROMedium <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"CRO\" & companySize == \"Medium\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCROMedium = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCROMedium[c(\"clinicalId\", \"includesCROMedium\")], by = \"clinicalId\", all.x = TRUE)
+
+includesCROSmall <- companiesClinicalIdDF |>
+  filter(companyGroupingSimplified == \"CRO\" & companySize == \"Small\") |>
+  group_by(clinicalId) |>
+  summarise(trialCount = n()) |>
+  mutate(includesCROSmall = TRUE)
+
+filteredData <- merge(x = filteredData, y = includesCROSmall[c(\"clinicalId\", \"includesCROSmall\")], by = \"clinicalId\", all.x = TRUE)
+
+```"

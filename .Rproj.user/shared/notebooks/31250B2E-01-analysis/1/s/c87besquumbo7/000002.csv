@@ -1,0 +1,3 @@
+"0","dataExtraction1 <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][[""statesAnalysis""]]"
+"0",""
+"0","write.table(dataExtraction1, ""02-rOutputs/dataExtraction1.csv"", row.names = FALSE, col.names = TRUE, sep = "","")"

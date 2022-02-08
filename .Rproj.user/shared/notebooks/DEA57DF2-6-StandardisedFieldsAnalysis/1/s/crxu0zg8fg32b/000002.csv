@@ -1,0 +1,48 @@
+"0","```r
+companiesData <- companiesData |>
+  mutate(CROshare = round(CROtrials/totalTrials, digits = 3)) |>
+  mutate(isCRO = case_when(
+    !is.na(contractResearch) & CROshare > 0.3 ~ TRUE,
+    CROshare > 0.5 & CROtrials > 5 ~ TRUE,
+    CROshare > 0.6 & CROtrials > 1 ~ TRUE,
+    TRUE ~ FALSE))
+
+companyTypeLookup <- companiesData |>
+  group_by(firmType, isCRO, companyType, ctype) |>
+  summarise(countOfTrials = n()) |>
+  mutate(companyGroup = case_when(
+    isCRO ~ 'CRO',
+    trimws(firmType) == 'Company' ~ 'Commercial',
+    grepl('Academic', firmType, fixed = TRUE) ~ 'Academic',
+    grepl('Clinical Trial Network', firmType, fixed = TRUE) ~ 'Institution',
+    grepl('Hospital', firmType, fixed = TRUE) ~ 'Hospital',
+    grepl('Advisor', firmType, fixed = TRUE) ~ 'Commercial',
+    grepl('Not-for-Profit', firmType, fixed = TRUE) ~ 'Non-profit',
+    grepl('Foundation', firmType, fixed = TRUE) ~ 'Non-profit',
+    grepl('Venture Capital', firmType, fixed = TRUE) ~ 'Commercial',
+    grepl('Private Equity', firmType, fixed = TRUE) ~ 'Commercial',
+    companyType %in% c('Institution','Government') ~ 'Institution',
+    !is.na(ctype) ~ ctype,
+    TRUE ~ 'Unknown'
+  )) |>
+  mutate(countOfTrials = NULL)
+```"
+"1","`summarise()` has grouped output by 'firmType', 'isCRO', 'companyType'. You can override using the `.groups` argument.
+"
+"0","```r
+companiesData <- merge(x = companiesData, y = companyTypeLookup, by = c('firmType','isCRO', 'companyType', 'ctype'), all.x = TRUE)
+
+companiesData <- companiesData |>
+  rowwise() |>
+  mutate(companyGroupingSimplified = case_when(
+    isCRO ~ \"CRO\",
+    companyGroup %in% c(\"Academic\", \"Institution\", \"Non-profit\", \"Academic/Institution\") ~ \"Institution/Non-profit\",
+    companyGroup == \"Commercial\" ~ \"Commercial\",
+    companyGroup == \"Hospital\" ~ \"Hospital\",
+    TRUE ~ \"Other\"
+  ))
+
+write.table(companiesData, paste0(\"unfilteredDataExports/companiesData-\",toString(Sys.Date()),\".csv\"), row.names = FALSE, col.names = TRUE, sep = \",\")
+
+rm(companyTypeLookup)
+```"

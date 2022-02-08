@@ -1,0 +1,8 @@
+"0","graph5Data <- lapply(byDateTherapeuticsAnalysis, function(x) {"
+"0","  "
+"0","  output <- x[[""statesAnalysis""]][c(""State.Code"", ""molnupiravirCoursesPer100000"", ""rowDate"")]"
+"0","}) |>"
+"0","  bind_rows() |>"
+"0","  pivot_wider(names_from = ""rowDate"", values_from = ""molnupiravirCoursesPer100000"")"
+"0",""
+"0","write.table(graph5Data, ""02-rOutputs/graph5Data.csv"", row.names = FALSE, col.names = TRUE, sep = "","")"

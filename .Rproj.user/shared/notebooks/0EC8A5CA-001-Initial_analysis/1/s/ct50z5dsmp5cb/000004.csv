@@ -1,0 +1,6 @@
+"0","grp <- therapeuticsDistributionDataFilter |>
+  group_by(DateMidpoint, stateCode, TherapeuticGrouped) |>
+  summarise(count = sum(DoseNumbers))
+"
+"1","`summarise()` has grouped output by 'DateMidpoint', 'stateCode'. You can override using the `.groups` argument.
+"
