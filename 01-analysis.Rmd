@@ -49,7 +49,11 @@ therapeuticsData <- lapply(therapeuticsFileNames, function(x) {
   mutate(rowYear = format(as.Date(rowDate, format="%Y-%m-%d"),"%Y")) |>
   mutate(monthYear = format(as.Date(rowDate, format="%Y-%m-%d"),"%m")) |>
   mutate(City = str_to_title(City)) |>
-  filter(!is.na(Courses.Available))
+  filter(!is.na(Courses.Available)) |>
+  mutate(Order.Label = case_when(
+    Order.Label == 'Molnupiravir  [Qty 20]' ~ 'Molnupiravir',
+    TRUE ~ Order.Label
+  ))
 ```
 
 <br><br><br>
@@ -111,6 +115,8 @@ cityPopulationData <- cityPopulationData[!duplicated(cityPopulationData$cityName
 #### Therapeutics analysis by date (by state and by city)
 ```{r}
 byDateTherapeuticsAnalysis <- lapply(unique(therapeuticsData$rowDate), function(x) {
+  
+  print(x)
   
   filteredData <- filter(therapeuticsData, rowDate == x)
   
@@ -182,7 +188,7 @@ byDateTherapeuticsAnalysis <- lapply(unique(therapeuticsData$rowDate), function(
 
 #### Data extraction (just used for checking which states/figures to include in the copy)
 ```{r}
-dataExtraction1 <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]]
+dataExtraction1 <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-09') [[1]][["statesAnalysis"]]
 
 write.table(dataExtraction1, "02-rOutputs/dataExtraction1.csv", row.names = FALSE, col.names = TRUE, sep = ",")
 ```
@@ -191,7 +197,7 @@ write.table(dataExtraction1, "02-rOutputs/dataExtraction1.csv", row.names = FALS
 
 #### Graph 1 - Covid-19 cases per course - last 7 days (states)
 ```{r}
-graph1Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]][c("State.Code", "cases7DaysPerPaxlovid", "cases7DaysPerMolnupiravir", "cases7DaysperPPlusM")]
+graph1Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-09') [[1]][["statesAnalysis"]][c("State.Code", "cases7DaysPerPaxlovid", "cases7DaysPerMolnupiravir", "cases7DaysperPPlusM")]
 
 write.table(graph1Data, "02-rOutputs/graph1Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
 ```
@@ -200,7 +206,7 @@ write.table(graph1Data, "02-rOutputs/graph1Data.csv", row.names = FALSE, col.nam
 
 #### Graph 2 - Available courses per 100,000 (states)
 ```{r}
-graph2Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]][c("State.Code", "paxlovidCoursesPer100000", "molnupiravirCoursesPer100000", "pPlusMCoursesPer100000")]
+graph2Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-09') [[1]][["statesAnalysis"]][c("State.Code", "paxlovidCoursesPer100000", "molnupiravirCoursesPer100000", "pPlusMCoursesPer100000")]
 
 write.table(graph2Data, "02-rOutputs/graph2Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
 ```
@@ -209,7 +215,7 @@ write.table(graph2Data, "02-rOutputs/graph2Data.csv", row.names = FALSE, col.nam
 
 #### Graph 3 - Correlation of courses to cases (states)
 ```{r}
-graph3Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-07') [[1]][["statesAnalysis"]][c("State.Code", "cases7DaysPer100000", "cases2022Per100000", "paxlovidCoursesPer100000", "molnupiravirCoursesPer100000", "pPlusMCoursesPer100000")]
+graph3Data <- list.filter(byDateTherapeuticsAnalysis, date == '2022-02-09') [[1]][["statesAnalysis"]][c("State.Code", "cases7DaysPer100000", "cases2022Per100000", "paxlovidCoursesPer100000", "molnupiravirCoursesPer100000", "pPlusMCoursesPer100000")]
 
 write.table(graph3Data, "02-rOutputs/graph3Data.csv", row.names = FALSE, col.names = TRUE, sep = ",")
 ```
@@ -284,3 +290,6 @@ write.table(molnupiravirDistributionData, "02-rOutputs/graph6Data-ii.csv", row.n
 ```{r}
 write.table(statePopData[c("NAME", "stateCode", "POPESTIMATE2020")], "02-rOutputs/stateNamePopLookup.csv", row.names = FALSE, col.names = TRUE, sep = ",")
 ```
+
+
+
